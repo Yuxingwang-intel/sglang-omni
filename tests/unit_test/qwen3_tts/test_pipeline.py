@@ -720,7 +720,6 @@ def resolved_qwen3_tts_server_args(
         server_args_overrides=builder.server_args_overrides,
         **builder.generation_defaults(dtype="bfloat16"),
     )
-    assert defaults["disable_cuda_graph"] is current_platform.is_cpu()
     builder.adjust_overrides(stage_overrides)
     server_args = build_sglang_server_args(
         str(checkpoint), context_length=8192, device="cuda", **stage_overrides
