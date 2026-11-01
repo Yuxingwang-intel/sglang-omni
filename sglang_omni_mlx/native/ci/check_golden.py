@@ -22,6 +22,7 @@ from typing import Callable, Protocol
 # (runtime bin, data root, golden file, manifest of the clips to run) -> outputs
 TranscribeCorpus = Callable[[Path, Path, dict, dict[str, dict]], dict[str, dict]]
 
+import cosyvoice3_golden
 import fishaudio_drama3_golden
 import music3_golden
 import qwen3_tts_golden
@@ -316,6 +317,11 @@ def run(transcribe_corpus: TranscribeCorpus) -> None:
             for case_id, case in golden["cases"].items()
         }
         metrics = {}
+    elif golden.get("kind") == "cosyvoice3":
+        results = cosyvoice3_golden.synthesize_cases(
+            arguments.runtime_bin, arguments.data_root, golden, chip()
+        )
+        metrics = {}
     else:
         results = transcribe_corpus(
             arguments.runtime_bin, arguments.data_root, golden, manifest
@@ -355,6 +361,8 @@ def run(transcribe_corpus: TranscribeCorpus) -> None:
         pass
     if golden.get("kind") in SPEECH_SYNTHESIZERS:
         report(*speech_golden.check(golden, device, results))
+    elif golden.get("kind") == "cosyvoice3":
+        report(*cosyvoice3_golden.check(golden, device, results))
     else:
         report(*check(golden, device, results, metrics))
 
