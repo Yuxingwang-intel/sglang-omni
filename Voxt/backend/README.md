@@ -81,7 +81,7 @@ and quitting stops it.
 - The Qwen3-ASR server API:
   - `/health` with `request_states`;
   - `/v1/models`;
-  - `/v1/audio/transcriptions` (JSON or SSE);
+  - `/v1/audio/transcriptions` (JSON or SSE), whose optional `repetition_penalty` (positive, default 1 = off; Voxt does not send it) scales down the logits of tokens already generated, as SGLang's sampler does on CUDA, to break runaway token loops;
   - the `/v1/realtime` manual-turn socket.
 - Qwen3-ASR's `/v1/audio/transcriptions` stops greedy decoding at a token loop (the last 24 tokens use at most 3 distinct ids) unless the request sends `stop_on_token_loop=false`, and the text keeps one copy of the repeated unit. `qwen3_asr_transcribe` does so only with `--stop-on-token-loop`. Realtime refreshes run without the guard.
 - `Voxt/Transcription/Omni*.swift` is the client:

@@ -191,6 +191,9 @@ def test_plain_request_returns_json_text(server: Server) -> None:
         ({"audio_layout": "sideways"}, "wav"),
         ({"max_new_tokens": "many"}, "wav"),
         ({"max_new_tokens": "-1"}, "wav"),
+        ({"repetition_penalty": "0"}, "wav"),
+        ({"repetition_penalty": "-1"}, "wav"),
+        ({"repetition_penalty": "nan"}, "wav"),
     ],
 )
 def test_invalid_requests_are_rejected(server: Server, fields: dict, wav) -> None:
@@ -200,6 +203,27 @@ def test_invalid_requests_are_rejected(server: Server, fields: dict, wav) -> Non
     assert status == 400
     detail = json.loads(body)["detail"]
     assert all(name in detail for name in fields)
+
+
+@pytest.mark.parametrize("repetition_penalty", ["0", "-1", "nan", "inf"])
+def test_invalid_cli_repetition_penalty_fails_before_model_loading(
+    repetition_penalty: str,
+) -> None:
+    """Invalid penalties reached decoding instead of being rejected before model loading."""
+    completed = subprocess.run(
+        [
+            str(Path(RUNTIME_BIN) / "qwen3_asr_transcribe"),
+            "--model-path",
+            "does-not-exist",
+            "--repetition-penalty",
+            repetition_penalty,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode != 0
+    assert "--repetition-penalty must be positive and finite" in completed.stderr
 
 
 def wav_bytes(pcm: bytes) -> bytes:
@@ -218,6 +242,31 @@ def long_wav(seconds: int) -> bytes:
     pcm = pcm16("0344_en_long")
     repeated = pcm * (seconds * 32000 // len(pcm) + 1)
     return wav_bytes(repeated[: seconds * 32000])
+
+
+def test_repetition_penalty_ends_a_token_loop(server: Server) -> None:
+    """Greedy decoding repeats one phrase on this audio until the token budget runs out, and repetition_penalty was ignored."""
+    # Note (Minyi Tang): 30.0 s to 31.1 s of this clip is the public loop trigger from issue 3044.
+    looping_wav = wav_bytes(
+        pcm16("0366_zh_long")[int(30.0 * 32000) : int(31.1 * 32000)]
+    )
+    finish_reasons = {}
+    for repetition_penalty in ("1", "1.2"):
+        status, body = server.post_form(
+            {
+                "stream": "true",
+                "language": "zh",
+                "include_generation_metadata": "true",
+                "stop_on_token_loop": "false",
+                "repetition_penalty": repetition_penalty,
+            },
+            looping_wav,
+        )
+        assert status == 200
+        finish_reasons[repetition_penalty] = sse_events(body)[0]["generation_metadata"][
+            "finish_reason"
+        ]
+    assert finish_reasons == {"1": "length", "1.2": "stop"}
 
 
 def test_a_disconnected_stream_stops_its_decode(server: Server) -> None:
