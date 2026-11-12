@@ -741,7 +741,7 @@ def add_common_args(
         "--sample-repeats",
         type=_positive_int,
         default=1,
-        help=("Repeat the selected audio this many times; requires --sample-index."),
+        help=("Repeat the selected audio this many times; requires --sample-ID."),
     )
     return parser
 
