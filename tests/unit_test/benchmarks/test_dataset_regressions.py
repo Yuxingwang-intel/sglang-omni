@@ -275,7 +275,7 @@ def test_asr_benchmark_selects_and_repeats_one_sample() -> None:
         seedtts.SampleInput("sample-1", "ref-1", "audio-1.wav", "target-1"),
     ]
 
-    repeated = benchmark_asr_seedtts._select_sample_repeats(samples, 1, 3)
+    repeated = benchmark_asr_seedtts._select_sample_repeats(samples, "sample-1", 3)
 
     assert [sample.sample_id for sample in repeated] == [
         "sample-1#repeat-0001",
@@ -295,8 +295,8 @@ def test_asr_benchmark_parses_sample_selection_options(
             "benchmark_asr_seedtts",
             "--port",
             "8000",
-            "--sample-index",
-            "42",
+            "--sample-id",
+            "sample-42",
             "--sample-repeats",
             "10",
         ],
@@ -304,26 +304,26 @@ def test_asr_benchmark_parses_sample_selection_options(
 
     args = benchmark_asr_seedtts.parse_args()
 
-    assert args.sample_index == 42
+    assert args.sample_id == "sample-42"
     assert args.sample_repeats == 10
 
 
 @pytest.mark.parametrize(
-    ("sample_index", "sample_repeats", "error"),
+    ("sample_id", "sample_repeats", "error"),
     [
-        (3, 1, "out of range"),
-        (None, 2, "requires --sample-index"),
+        ("missing", 1, "matched 0 samples"),
+        (None, 2, "requires --sample-id"),
     ],
 )
 def test_asr_benchmark_rejects_invalid_sample_selection(
-    sample_index: int | None,
+    sample_id: str | None,
     sample_repeats: int,
     error: str,
 ) -> None:
     with pytest.raises(ValueError, match=error):
         benchmark_asr_seedtts._select_sample_repeats(
             [seedtts.SampleInput("sample-0", "ref", "sample.wav", "target")],
-            sample_index,
+            sample_id,
             sample_repeats,
         )
 
