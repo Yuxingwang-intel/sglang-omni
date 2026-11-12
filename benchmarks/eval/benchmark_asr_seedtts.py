@@ -37,6 +37,12 @@ Usage:
     python -m benchmarks.eval.benchmark_asr_seedtts \
         --port 8000 --max-samples 20 --concurrencies 2,32 --repeats 3
 
+    # Repeat one dataset sample 100 times at concurrency 4:
+    python -m benchmarks.eval.benchmark_asr_seedtts \
+        --port 8000 --lang en \
+        --sample-id common_voice_en_36558935-common_voice_en_36558813 \
+        --sample-repeats 100 --concurrencies 4 --repeats 1
+
     # Run the same sweep against Fun-ASR-Nano:
     python -m sglang_omni.cli serve \
         --model-path FunAudioLLM/Fun-ASR-Nano-2512-hf --port 8000
@@ -94,6 +100,7 @@ import logging
 import os
 import statistics
 import time
+from dataclasses import replace
 
 import requests
 
@@ -126,6 +133,16 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
+
+
 def _parse_concurrencies(value: str) -> list[int]:
     tokens = [token.strip() for token in value.split(",")]
     if not tokens or any(not token for token in tokens):
@@ -151,6 +168,40 @@ def _evaluation_input_sha256(
             while chunk := audio.read(1024 * 1024):
                 digest.update(chunk)
     return digest.hexdigest()
+
+
+def _select_sample_repeats(
+    samples: list[SampleInput],
+    sample_id: str | None,
+    sample_repeat_count: int,
+) -> list[SampleInput]:
+    if sample_id is None:
+        if sample_repeat_count != 1:
+            raise ValueError("--sample-repeats requires --sample-id")
+        return samples
+    else:
+        pass
+    matching_samples = [sample for sample in samples if sample.sample_id == sample_id]
+    if len(matching_samples) != 1:
+        raise ValueError(
+            f"--sample-id {sample_id!r} matched {len(matching_samples)} samples; "
+            "expected exactly one"
+        )
+    else:
+        pass
+
+    selected_sample = matching_samples[0]
+    if sample_repeat_count == 1:
+        return [selected_sample]
+    else:
+        pass
+    return [
+        replace(
+            selected_sample,
+            sample_id=f"{selected_sample.sample_id}#repeat-{repeat_index:04d}",
+        )
+        for repeat_index in range(1, sample_repeat_count + 1)
+    ]
 
 
 def _fetch_worker_snapshot(host: str, port: int) -> dict | None:
@@ -681,6 +732,17 @@ def add_common_args(
             "output JSON."
         ),
     )
+    parser.add_argument(
+        "--sample-id",
+        default=None,
+        help="Select one sample by its dataset sample ID.",
+    )
+    parser.add_argument(
+        "--sample-repeats",
+        type=_positive_int,
+        default=1,
+        help=("Repeat the selected audio this many times; requires --sample-ID."),
+    )
     return parser
 
 
@@ -825,9 +887,13 @@ def main() -> None:
     )
     if not samples:
         raise RuntimeError(f"No SeedTTS samples loaded from {args.meta!r}")
+    samples = _select_sample_repeats(
+        samples, sample_id=args.sample_id, sample_repeat_count=args.sample_repeats
+    )
     evaluation_input_sha256 = _evaluation_input_sha256(samples)
     print(
         f"Loaded {len(samples)} SeedTTS {args.lang} samples; "
+        f"sample_id={args.sample_id}, sample_repeats={args.sample_repeats}; "
         f"sweeping concurrency={concurrencies} x {args.repeats} repeats "
         f"against {args.host}:{args.port} ({args.model_path})"
     )
@@ -865,6 +931,8 @@ def main() -> None:
             "declared_model_revision": model_revision,
             "dataset_revision": dataset_revision,
             "num_samples": len(samples),
+            "sample_id": args.sample_id,
+            "sample_repeats": args.sample_repeats,
             "unique_audio": args.unique_audio,
             "concurrencies": concurrencies,
             "repeats": args.repeats,
