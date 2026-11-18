@@ -269,6 +269,65 @@ def test_custom_seedtts_repo_does_not_use_canonical_revision(
     assert captured["dataset_revision"] is None
 
 
+def test_asr_benchmark_selects_and_repeats_one_sample() -> None:
+    samples = [
+        seedtts.SampleInput("sample-0", "ref-0", "audio-0.wav", "target-0"),
+        seedtts.SampleInput("sample-1", "ref-1", "audio-1.wav", "target-1"),
+    ]
+
+    repeated = benchmark_asr_seedtts._select_sample_repeats(samples, "sample-1", 3)
+
+    assert [sample.sample_id for sample in repeated] == [
+        "sample-1#repeat-0001",
+        "sample-1#repeat-0002",
+        "sample-1#repeat-0003",
+    ]
+    assert {sample.ref_audio for sample in repeated} == {"audio-1.wav"}
+
+
+def test_asr_benchmark_parses_sample_selection_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "benchmark_asr_seedtts",
+            "--port",
+            "8000",
+            "--sample-id",
+            "sample-42",
+            "--sample-repeats",
+            "10",
+        ],
+    )
+
+    args = benchmark_asr_seedtts.parse_args()
+
+    assert args.sample_id == "sample-42"
+    assert args.sample_repeats == 10
+
+
+@pytest.mark.parametrize(
+    ("sample_id", "sample_repeats", "error"),
+    [
+        ("missing", 1, "matched 0 samples"),
+        (None, 2, "requires --sample-id"),
+    ],
+)
+def test_asr_benchmark_rejects_invalid_sample_selection(
+    sample_id: str | None,
+    sample_repeats: int,
+    error: str,
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        benchmark_asr_seedtts._select_sample_repeats(
+            [seedtts.SampleInput("sample-0", "ref", "sample.wav", "target")],
+            sample_id,
+            sample_repeats,
+        )
+
+
 @pytest.mark.parametrize(
     "extra_args",
     [
