@@ -7,6 +7,7 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 from transformers import WhisperConfig
 
 from sglang_omni.models.whisper_asr import sglang_model
+from sglang_omni.models.whisper_asr.config import WhisperASRFactoryArgs
 from sglang_omni.models.whisper_asr.sglang_model import (
     WhisperEncoderAttention,
     whisper_encoder_attention,
@@ -103,7 +104,8 @@ def test_fa4_encoder_attention_matches_sdpa_on_cuda(
 
 
 @pytest.mark.parametrize(
-    "backend,error", [("unknown", ValueError), ("fa4", RuntimeError)]
+    "backend,error",
+    [("unknown", ValueError), ("fa4", RuntimeError), ("intel_amx", RuntimeError)],
 )
 def test_encoder_attention_rejects_invalid_or_unavailable_backend(
     backend: str, error: type[Exception]
@@ -113,6 +115,35 @@ def test_encoder_attention_rejects_invalid_or_unavailable_backend(
     with pytest.raises(error):
         whisper_encoder_attention(states, states, states, backend)
 
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("batch_size,sequence_length", [(1, 31), (2, 37), (1, 1500)])
+def test_amx_encoder_attention_matches_sdpa(
+    dtype: torch.dtype, batch_size: int, sequence_length: int
+) -> None:
+    if not sglang_model.cpu_has_amx_support() or not hasattr(
+        torch.ops.sgl_kernel, "flash_attn_varlen_func"
+    ):
+        pytest.skip("SGLang CPU AMX attention is unavailable")
+    else:
+        torch.manual_seed(29)
+        projected = torch.randn(batch_size, sequence_length, 384, dtype=dtype)
+        query, key, value = (
+            states.reshape(batch_size, sequence_length, 2, 64)
+            for states in projected.chunk(3, dim=-1)
+        )
+        actual = whisper_encoder_attention(query, key, value, "intel_amx")
+        automatic = whisper_encoder_attention(query, key, value, "auto")
+        expected = F.scaled_dot_product_attention(
+            query.float().transpose(1, 2),
+            key.float().transpose(1, 2),
+            value.float().transpose(1, 2),
+        ).transpose(1, 2)
+        tolerance = 2e-3 if dtype == torch.float16 else 2e-2
+        torch.testing.assert_close(
+            actual.float(), expected, rtol=tolerance, atol=tolerance
+        )
+        torch.testing.assert_close(automatic, actual)
 
 def test_encoder_backend_is_owned_by_each_model() -> None:
     """One model's forced FA4 setting must not change another model's SDPA path."""

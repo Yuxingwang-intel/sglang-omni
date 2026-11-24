@@ -23,6 +23,7 @@ from sglang.srt.mem_cache.memory_pool import KVWriteLoc
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_executor.forward_context import get_attn_backend
 from sglang.srt.model_loader.weight_utils import default_weight_loader
+from sglang.srt.utils.common import cpu_has_amx_support
 from torch import nn
 from transformers import WhisperConfig
 from transformers.activations import ACT2FN
@@ -100,10 +101,20 @@ def whisper_encoder_attention(
     query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, backend: str
 ) -> torch.Tensor:
     """Non-causal attention over [batch, frames, heads, head_dim] encoder states."""
-    if backend not in ("auto", "sdpa", "fa4"):
+    if backend not in ("auto", "sdpa", "fa4", "intel_amx"):
         raise ValueError(f"Unknown Whisper encoder attention backend: {backend}")
     else:
         pass
+    can_use_amx = (
+        backend in ("auto", "intel_amx")
+        and query.device.type == "cpu"
+        and query.dtype in (torch.float16, torch.bfloat16)
+        and query.shape[-1] % 2 == 0
+        and query.shape[0] > 0
+        and query.shape[1] > 0
+        and cpu_has_amx_support()
+        and hasattr(torch.ops.sgl_kernel, "flash_attn_varlen_func")
+    )
     can_use_fa4 = (
         flash_attn_func is not None
         and query.device.type == "cuda"
@@ -111,7 +122,29 @@ def whisper_encoder_attention(
         and query.shape[-1] == 64
         and torch.cuda.get_device_capability(query.device)[0] >= 9
     )
-    if backend == "fa4" and not can_use_fa4:
+    if backend == "intel_amx" and not can_use_amx:
+        raise RuntimeError(
+            "Intel AMX requires the SGLang CPU kernel and eligible CPU inputs"
+        )
+    elif can_use_amx:
+        batch_size, sequence_length, num_heads, head_dim = query.shape
+        cumulative_sequence_lengths = torch.arange(
+            0, (batch_size + 1) * sequence_length, sequence_length, dtype=torch.int32
+        )
+        attention_output = torch.ops.sgl_kernel.flash_attn_varlen_func(
+            query.reshape(-1, num_heads, head_dim),
+            key.reshape(-1, num_heads, head_dim),
+            value.reshape(-1, num_heads, head_dim),
+            cumulative_sequence_lengths,
+            cumulative_sequence_lengths,
+            sequence_length,
+            sequence_length,
+            False,
+        )
+        return attention_output.reshape(
+            batch_size, sequence_length, num_heads, head_dim
+        ).contiguous()
+    elif backend == "fa4" and not can_use_fa4:
         raise RuntimeError("FA4 requires an installed backend and eligible CUDA inputs")
     elif backend != "sdpa" and can_use_fa4:
         attention_output = flash_attn_func(query, key, value, causal=False)

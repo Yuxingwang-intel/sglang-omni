@@ -466,7 +466,9 @@ def test_whisper_asr_config_uses_single_batched_stage() -> None:
     )
 
 
-@pytest.mark.parametrize("encoder_attention_backend", [None, "auto", "sdpa", "fa4"])
+@pytest.mark.parametrize(
+    "encoder_attention_backend", [None, "auto", "sdpa", "fa4", "intel_amx"]
+)
 def test_whisper_asr_threads_explicit_cuda_graph_bs(
     monkeypatch: pytest.MonkeyPatch, encoder_attention_backend: str | None
 ) -> None:

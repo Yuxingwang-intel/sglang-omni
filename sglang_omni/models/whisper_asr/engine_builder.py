@@ -198,7 +198,7 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
     def __init__(
         self,
         *,
-        encoder_attention_backend: Literal["auto", "sdpa", "fa4"],
+        encoder_attention_backend: Literal["auto", "sdpa", "fa4", "intel_amx"],
         max_running_requests: int,
         max_new_tokens: int,
         stream_emit_interval_s: float = 0.05,
@@ -224,7 +224,7 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
         pre_lm_max_batch_wait_ms: int = 0,
         pre_lm_cache_pin_host_memory: bool = True,
     ) -> None:
-        if encoder_attention_backend not in ("auto", "sdpa", "fa4"):
+        if encoder_attention_backend not in ("auto", "sdpa", "fa4", "intel_amx"):
             raise ValueError(
                 f"Unknown Whisper encoder attention backend: {encoder_attention_backend}"
             )

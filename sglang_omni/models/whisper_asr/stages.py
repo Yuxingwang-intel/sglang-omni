@@ -12,7 +12,7 @@ from sglang_omni.models.whisper_asr.config import WhisperASRFactoryArgs
 def create_sglang_whisper_asr_executor(
     model_path: str,
     *,
-    encoder_attention_backend: Literal["auto", "sdpa", "fa4"] | None = None,
+    encoder_attention_backend: Literal["auto", "sdpa", "fa4", "intel_amx"] | None = None,
     device: str | None = None,
     gpu_id: int | None = None,
     dtype: str = "float16",
